@@ -1,2 +1,2 @@
 # alexkgrimes.github.io
-Ryan Lochte Jeah
+Alex Grimes 
