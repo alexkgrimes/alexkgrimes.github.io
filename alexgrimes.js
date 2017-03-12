@@ -1,5 +1,5 @@
 
-
+/*
 var granimInstance = new Granim({
     element: '#canvas-basic',
     name: 'basic-gradient',
@@ -28,3 +28,4 @@ var granimInstance = new Granim({
       console.log('Granim: onEnd');
     }
 });
+*/

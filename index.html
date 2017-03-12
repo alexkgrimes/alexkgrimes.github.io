@@ -1,7 +1,8 @@
 <html lang="en">
 <html>
 	<head>
-
+		<meta charset="utf-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
 		<meta name="viewport" content="width=device-width initial-scale=1.0 user-scalable=yes">
 		<meta name="description" content="Hello! I'm Alex Grimes, a student at Northwestern University and an aspiring software engineer.">
 		<meta name="title" content="Alex Grimes - Northwestern University">
@@ -11,13 +12,21 @@
 		<title>Alex Grimes</title>
 
 		<!--Styles-->
-		<link rel="stylesheet" type="text/css" href="./style.css">
+		<link rel="stylesheet" type="text/css" href="style.css">
+		<link rel="stylesheet" href="css/font-awesome.min.css">
 		<!--Fonts-->
 		<link href="https://fonts.googleapis.com/css?family=Give+You+Glory" rel="stylesheet">
 		<!--Google Analytics-->
 		<script async src="https://www.google-analytics.com/analytics.js"></script>
 
-		<script type="text/javascript" src="alexgrimes.js"></script>
+		<script>
+      (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+      (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+      m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+      })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+      ga('create', 'UA-72289519-1', 'auto');
+      ga('send', 'pageview');
+    </script>
 	</head>
 
 	<body id="page-top" data-spy="scroll" data-target=".navbar" data-offset="51">
@@ -28,13 +37,18 @@
 					<div class="row">
 						<ul class="list-inline">
 							<li>
-								<a class = "linkedin" href="https://www.linkedin.com/in/alex-grimes-3b9631106/">
-									<h3>LinkedIn</h3>
+								<a href="https://github.com/alexkgrimes">
+									<span class="fa fa-github" aria-hidden="true">GitHub</span>
 								</a>
 							</li>
 							<li>
-								<a class = "resume" href="Resume.docx">
-									<h3>Resume</h3>
+								<a href="https://www.linkedin.com/in/alex-grimes-3b9631106/">
+									<span class="fa fa-linkedin" aria-hidden="true">Linkedin</span>
+								</a>
+							</li>
+							<li>
+								<a href="Resume.docx">
+									<span class="fa fa-file-text" aria-hidden="true">Resume</span>
 							  </a>
 							</li>
 						</ul>
