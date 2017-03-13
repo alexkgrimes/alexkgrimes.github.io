@@ -13,7 +13,6 @@ background: linear-gradient(to bottom right, #71a9f7, #72195a);
 color:white;
 display: table;
 font-family: 'Give You Glory', cursive;
-text-shadow: 4px, 4px, #000000;
 -moz-user-select: none;
 -webkit-user-select: none;
 -ms-user-select:none;
@@ -25,6 +24,8 @@ header {
 	display: table-cell;
 	vertical-align: middle;
 	text-align: center;
+  text-shadow: 4px, 4px, #000000;
+
 }
 
 h1 {
