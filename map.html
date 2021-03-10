@@ -1,0 +1,391 @@
+<html>
+  <!DOCTYPE html>
+  <meta charset="utf-8" />
+  <style>
+    .state {
+      fill: #ccc;
+      stroke: #fff;
+    }
+
+    .symbol {
+      fill-opacity: 0.5;
+      stroke: #fff;
+    }
+
+    .map {
+      background-color: #daecff;
+      float: left;
+    }
+
+    .info {
+      float: left;
+      padding-left: 40px;
+    }
+  </style>
+
+  <body>
+    <link
+      rel="stylesheet"
+      href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"
+    />
+    <!-- d3 v6 integration -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <!-- d3 topojson -->
+    <script src="http://d3js.org/topojson.v1.min.js"></script>
+
+    <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <h1>California Fires</h1>
+
+    <script>
+      let width = 750,
+        height = 700;
+
+      let projection = d3
+        .geoMercator()
+        .translate([width / 0.113, height / 0.2855])
+        .scale([3000]);
+
+      let projectionWrapper = (arr) => {
+        let proj = projection(arr);
+        if (isNaN(proj[0]) || isNaN(proj[1])) {
+          return [-1, -1];
+        } else {
+          return proj;
+        }
+      };
+
+      let path = d3.geoPath().projection(projection);
+
+      const zoom = d3
+        .zoom()
+        .on("zoom", (event) => {
+          mapLayer.attr("transform", event.transform);
+        })
+        .scaleExtent([1, 40]);
+
+      let mapLayer = d3
+        .select("body")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("class", "map")
+        .call(zoom)
+        .append("g");
+
+      let dataset, california, fires, minAcres, maxAcres;
+      let tooltip;
+      let attributes = ["incident_acres_burned", "year"];
+
+      var mapAcreToArea= false;
+
+      function isRange(attribute) {
+        if (attribute == "incident_acres_burned") {
+          return true;
+        } else {
+          return false;
+        }
+      }
+
+      ready();
+
+      async function ready() {
+        california = await d3.json("states.json");
+        fires = await d3.csv("mapdataall.csv");
+        fires.forEach((d) => {
+          d.incident_acres_burned = +d.incident_acres_burned;
+          d.incident_longitude = +d.incident_longitude;
+          d.incident_latitude = +d.incident_latitude;
+          d.year = d.incident_date_created.substring(0, 4);
+          if (d.incident_acres_burned == 0) {
+            d.incident_acres_burned = 1;
+          }
+        });
+        dataset = fires;
+
+        // draw the state
+        mapLayer
+          .append("path")
+          .attr("class", "state")
+          .datum(topojson.feature(california, california.objects.usStates))
+          .attr("d", path);
+
+        // initialize tooltip
+        tooltip = d3
+          .select(".current")
+          .append("div")
+          .attr("class", "tooltip")
+          .style("opacity", 0);
+
+        var years = d3.sort(new Set(dataset.map ( d => d.year )).values());
+
+        ranges = {};
+        filter_query = [];
+        for (let attr of attributes) {
+          if (!isRange(attr)) {
+            filter_query.push({
+              key: attr,
+              values: years,
+            })
+          } else {
+            let column = dataset.map((d) => d[attr]);
+            ranges[attr] = [d3.min(column), d3.max(column)];
+            filter_query.push({
+              key: attr,
+              range: [
+                // deep copy
+                ranges[attr][0],
+                ranges[attr][1],
+              ],
+            });
+          }
+        }
+
+        let range_start = 0;
+        let range_end = 500000;
+        let max_buffer = 100000;
+
+        var acresLogScale = d3
+          .scaleLog()
+          .domain([
+            ranges.incident_acres_burned[0],
+            ranges.incident_acres_burned[1] + max_buffer,
+          ])
+          .range([range_start, range_end]);
+
+        $(function () {
+          $("#slider-range").slider({
+            range: true,
+            min: range_start,
+            max: range_end,
+            values: ranges.incident_acres_burned,
+            slide: function (event, ui) {
+              $("#size").val(
+                Math.round(acresLogScale.invert(ui.values[0])) +
+                  " - " +
+                  Math.round(acresLogScale.invert(ui.values[1]))
+              );
+              filterData("incident_acres_burned", [
+                acresLogScale.invert(ui.values[0]),
+                acresLogScale.invert(ui.values[1]),
+              ]);
+            },
+          });
+
+          $("#size").val(
+            ranges.incident_acres_burned[0] +
+              " - " +
+              (ranges.incident_acres_burned[1] + max_buffer)
+          );
+        });
+
+        $(function () {
+          for (var value of years) {
+            $("#year-checks")
+              .append(`<input class="year-check" type="checkbox" id="${value}" value="${value}" checked>`)
+              .append(`<label for="${value}">${value}</label></div>`)
+              .append(`<br>`);
+          }
+          filter_query["years"] = years;
+
+          $(".year-check").change(function () {
+            if($(this).is(":checked")) {
+              var years = filter_query["years"];
+              if (!years.includes($(this).attr("id"))) {
+                years.push($(this).attr("id"));
+              }
+              filterData("years", years);
+            } else {
+              var years = filter_query["years"];
+              if (years.includes($(this).attr("id"))) {
+                const index = years.indexOf($(this).attr("id"));
+                if (index > -1) {
+                  years.splice(index, 1);
+                }
+              }
+              filterData("years", years);
+            }
+          });
+        });
+
+        $(function () {
+            $("#acre-to-area")
+              .append(`<input class="acre-area-check" type="checkbox" id="acre-area-check">`)
+              .append(`<label for="acre-to-area">Map Acreage to Area</label></div>`)
+              .append(`<br>`);
+
+          $(".acre-area-check").change(function () {
+            if($(this).is(":checked")) {
+              mapAcreToArea = true;
+            } else {
+              mapAcreToArea = false;
+            }
+            updateMap();
+          });
+        });
+
+        drawVis(dataset);
+      }
+
+      function drawVis(dataset) {
+        //draw the circiles initially and on each interaction with a control
+        let map = mapLayer
+          .selectAll("circle")
+          .data(dataset, (d) => d.incident_id); // give it a key
+
+        // filter out first
+        map.exit().remove();
+
+        map
+          .enter()
+          .append("circle")
+          .attr("fill-opacity", 0.5)
+          .attr("fill", "#ff5349")
+          .attr("r", d => { 
+          if (mapAcreToArea) {
+            return Math.sqrt(d.incident_acres_burned / 3.14) / 10;
+          } else {
+            return 4;
+          } })
+          .attr(
+            "transform",
+            (d) =>
+              "translate(" +
+              projectionWrapper([d.incident_longitude, d.incident_latitude]) +
+              ")"
+          )
+          .on("mouseover", function (event, d, i) {
+            d3.select(this).attr("fill-opacity", 1);
+            tooltip.transition().duration(200).style("opacity", 1);
+            tooltip
+              .html(
+                "<b>" +
+                  d.incident_name +
+                  "</b><br>" +
+                  "Year: " +
+                  d.year +
+                  "<br>County: " +
+                  d.incident_county +
+                  "<br>" +
+                  "Acres: " +
+                  d.incident_acres_burned
+              )
+              .style("left", event.pageX + 5 + "px")
+              .style("top", event.pageY - 28 + "px");
+          })
+          .on("mouseout", function (d, i) {
+            d3.select(this).attr("fill-opacity", 0.5);
+            tooltip.transition().duration(500).style("opacity", 0.5);
+          });
+
+          map.attr("r", d => { 
+          if (mapAcreToArea) {
+            return Math.sqrt(d.incident_acres_burned / 3.14) / 10;
+          } else {
+            return 4;
+          } });
+      }
+
+      function updateMap() {
+        // generating query
+        let query = [];
+        for (let attr in filter_query) {
+          // for simpler code, consider using underscore.js or equivalent.
+          let r = filter_query[attr];
+          if (r.constructor.name === "Array" && isRange(attr)) {
+            // how you get datatype
+            // for a continous variable (filtered by array)
+            query.push({
+              key: attr,
+              range: r,
+            });
+          } else if (r.constructor.name === "Array") {
+              // for categorical variable, when it is "all", no query is generated
+              query.push({
+                key: attr,
+                values: r
+              })
+            }
+        }
+        let toVisualize = dataset.filter((d, i) => isQueried(d, query));
+        drawVis(toVisualize);
+      }
+
+      function filterData(_attr, values) {
+        //update filter data
+        filter_query[_attr] = values;
+        // generating query
+        let query = [];
+        for (let attr in filter_query) {
+          // for simpler code, consider using underscore.js or equivalent.
+          let r = filter_query[attr];
+          if (r.constructor.name === "Array" && isRange(attr)) {
+            // how you get datatype
+            // for a continous variable (filtered by array)
+            query.push({
+              key: attr,
+              range: r,
+            });
+          } else if (r.constructor.name === "Array") {
+              // for categorical variable, when it is "all", no query is generated
+              query.push({
+                key: attr,
+                values: r
+              })
+            }
+        }
+        let toVisualize = dataset.filter((d, i) => isQueried(d, query));
+        drawVis(toVisualize);
+      }
+
+      function isQueried(d, query) {
+        // if not in a range or not the value, return false; otherwise return true;
+        // query could be JSON, but Array tends to be more generic.
+        
+        for (let i = 0; i < query.length; i++) {
+          let val = d[query[i].key];
+          if (query[i].hasOwnProperty("range")) {
+            if (query[i].range[0] > val || query[i].range[1] < val) {
+              return false;
+            }
+          } else if (query[i].hasOwnProperty("values")) {
+            // TODO
+            val = d.year;
+            if (!query[i].values.includes(val)) {
+              return false;
+            }
+          }
+        }
+        return true;
+      }
+    </script>
+    <div class="info">
+      <p class="current"></p>
+
+      <p>
+        <label for="size">Acres burned:</label>
+        <input
+          type="text"
+          id="size"
+          readonly
+          style="border: 0; color: #f6931f; font-weight: bold"
+        />
+      </p>
+
+      <div id="slider-range"></div>
+      <p><br /></p>
+      <p>
+        <label for="year">Year:</label>
+        <div id="year-checks"></div>
+
+      </p>
+
+      <label for="map-to-area">Map interactions:</label>
+      <p></p>
+        <div id="acre-to-area"></div>        
+      </p>
+      
+
+    </div>
+  </body>
+</html>
