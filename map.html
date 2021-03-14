@@ -1,0 +1,653 @@
+<html>
+  <!DOCTYPE html>
+  <meta charset="utf-8" />
+  <style>
+    .state {
+      fill: #ccc;
+      stroke: #fff;
+    }
+
+    .county {
+      fill: #ccc;
+      stroke: #fff;
+    }
+
+    .symbol {
+      fill-opacity: 0.5;
+      stroke: #fff;
+    }
+
+    .map {
+      background-color: #daecff;
+      float: left;
+    }
+
+    .city {
+      fill-opacity: 1;
+      stroke: #000;
+    }
+
+    .labels {
+      fill: #444;
+      font-family:arial;
+      font-size:0.7em;
+    }
+
+    .accumulative-info {
+      font-family: Arial;
+      width: 230px;
+    }
+
+    .info {
+      font-family: Arial;
+      font-size: 0.9em;
+      float: left;
+      padding-left: 40px;
+      padding-right: 40px;
+      word-wrap: break-word;
+      width: 400px;
+      background-color: #f2f2f2;
+      height: 700px;
+    }
+
+    .foo {
+      float: left;
+      width: 12px;
+      height: 12px;
+      margin: 2px;
+      border: 1px solid rgba(0, 0, 0, .2);
+    }
+  </style>
+
+  <body>
+    <link
+      rel="stylesheet"
+      href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"
+    />
+    <!-- d3 v6 integration -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+    <!-- d3 topojson -->
+    <script src="https://d3js.org/topojson.v1.min.js"></script>
+
+    <script src="https://code.jquery.com/jquery-1.12.4.js"></script>
+    <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+    <h1 style="font-family: Arial;">California Fires</h1>
+
+    <script>
+      let width = 750,
+        height = 700;
+
+      let projection = d3
+        .geoMercator()
+        .translate([width / 0.113, height / 0.2855])
+        .scale([3000]);
+
+      let path = d3.geoPath().projection(projection);
+
+      const zoom = d3
+        .zoom()
+        .on("zoom", (event) => {
+          mapLayer.attr("transform", event.transform);
+        })
+        .scaleExtent([1, 40]);
+
+      let mapLayer = d3
+        .select("body")
+        .append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .attr("class", "map")
+        .call(zoom)
+        .append("g");
+
+      let dataset, california, nevada, oregon, fires, colorScale, counties, cities;
+      let tooltip, cumulativeInfo;
+      let attributes = ["incident_acres_burned", "year"];
+
+      var mapAcreToArea= false;
+      var showColors = false;
+      var showCounties = false;
+      var showCities = false;
+      var countiesHasChanged = false;
+
+      function isRange(attribute) {
+        if (attribute == "incident_acres_burned") {
+          return true;
+        } else {
+          return false;
+        }
+      }
+
+      ready();
+
+      async function ready() {
+        california = await d3.json("CA.geojson");
+        nevada = await d3.json("NV.geojson");
+        oregon = await d3.json("OR.geojson");
+        arizona = await d3.json("AZ.geojson");
+        utah = await d3.json("UT.geojson");
+        idaho = await d3.json("ID.geojson");
+        counties = await d3.json("us-county-boundaries.geojson");
+        counties.features.sort(function(x, y){
+          return d3.ascending(x.properties.name, y.properties.name);
+        })
+        cities = await d3.json("cities.json");
+
+        states = [california, nevada, oregon, arizona, utah, idaho];
+        states.forEach((state) => {
+          mapLayer
+          .append("path")
+          .attr("class", "state")
+          .data([state])
+          .attr("d", path);
+        })
+
+        fires = await d3.csv("calfiredata.csv");
+        fires.forEach((d) => {
+          d.incident_acres_burned = +d.incident_acres_burned;
+          d.incident_longitude = +d.incident_longitude;
+          d.incident_latitude = +d.incident_latitude;
+          d.year = d.incident_date_created.substring(0, 4);
+
+          if (d.incident_acres_burned == 0) {
+            d.incident_acres_burned = 1;
+          }
+          d.incident_county = d.incident_county.split(',');
+          for (let i = 0; i < d.incident_county.length; i++) {
+            d.incident_county[i].trim();
+          }
+        });
+        dataset = fires;
+
+        colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+        // initialize tooltip
+        tooltip = d3
+          .select(".current")
+          .append("div")
+          .attr("class", "tooltip")
+          .style("opacity", 0.5)
+              .html(
+                "<b>Incident Name</b><br>Year: <br>County: <br>Acres: "
+              );
+
+        cumulativeInfo = d3
+          .select(".accumulative-info")
+          .append("div")
+          .html("<b>Cumulative Info:</b><br>Number of Fires: <br>Total Acres Burned: ");
+
+        var years = d3.sort(new Set(dataset.map ( d => d.year )).values());
+
+        ranges = {};
+        filter_query = [];
+        for (let attr of attributes) {
+          if (!isRange(attr)) {
+            filter_query.push({
+              key: attr,
+              values: years,
+            })
+          } else {
+            let column = dataset.map((d) => d[attr]);
+            ranges[attr] = [d3.min(column), d3.max(column)];
+            filter_query.push({
+              key: attr,
+              range: [
+                // deep copy
+                ranges[attr][0],
+                ranges[attr][1],
+              ],
+            });
+          }
+        }
+
+        let range_start = 0;
+        let range_end = 500000;
+        let max_buffer = 100000;
+
+        var acresLogScale = d3
+          .scaleLog()
+          .domain([
+            ranges.incident_acres_burned[0],
+            ranges.incident_acres_burned[1] + max_buffer,
+          ])
+          .range([range_start, range_end]);
+
+        $(function () {
+          $("#slider-range").slider({
+            range: true,
+            min: range_start,
+            max: range_end,
+            values: ranges.incident_acres_burned,
+            slide: function (event, ui) {
+              $("#size").val(
+                Math.round(acresLogScale.invert(ui.values[0])) +
+                  " - " +
+                  Math.round(acresLogScale.invert(ui.values[1]))
+              );
+              filterData("incident_acres_burned", [
+                acresLogScale.invert(ui.values[0]),
+                acresLogScale.invert(ui.values[1]),
+              ]);
+            },
+        });
+
+          $("#size").val(
+            ranges.incident_acres_burned[0] +
+              " - " +
+              (ranges.incident_acres_burned[1] + max_buffer)
+          );
+        });
+
+        $(function () {
+          for (var value of years) {
+            $("#year-checks")
+              .append(`<input class="year-check" type="checkbox" id="${value}" value="${value}"" checked>`)
+              .append(`<label for="${value}">${value}</label></div>`)
+              .append(`<div class='foo' style='background:${colorScale(value)};'></div>`)
+              .append(`<br>`);
+          }
+          filter_query["years"] = years;
+
+          $(".year-check").change(function () {
+            if($(this).is(":checked")) {
+              var years = filter_query["years"];
+              if (!years.includes($(this).attr("id"))) {
+                years.push($(this).attr("id"));
+              }
+              filterData("years", years);
+            } else {
+              var years = filter_query["years"];
+              if (years.includes($(this).attr("id"))) {
+                const index = years.indexOf($(this).attr("id"));
+                if (index > -1) {
+                  years.splice(index, 1);
+                }
+              }
+              filterData("years", years);
+            }
+          });
+        });
+
+        $(function () {
+            $("#acre-to-area")
+              .append(`<input class="acre-area-check" type="checkbox" id="acre-area-check">`)
+              .append(`<label for="acre-to-area">Map Acreage to Area</label></div>`)
+              .append(`<br>`);
+
+          $(".acre-area-check").change(function () {
+            if($(this).is(":checked")) {
+              mapAcreToArea = true;
+            } else {
+              mapAcreToArea = false;
+            }
+            updateMap();
+          });
+        });
+
+        $(function () {
+            $("#year-to-color")
+              .append(`<input class="year-color-check" type="checkbox" id="year-color-check">`)
+              .append(`<label for="year-to-color">Map Year to Color</label></div>`)
+              .append(`<br>`);
+
+          $(".year-color-check").change(function () {
+            if($(this).is(":checked")) {
+              showColors = true;
+            } else {
+              showColors = false;
+            }
+            updateMap();
+          });
+        });
+
+        $(function () {
+            $("#show-counties")
+              .append(`<input class="show-counties-check" type="checkbox" id="show-counties-check">`)
+              .append(`<label for="show-counties-check">Show Counties</label></div>`)
+              .append(`<br>`);
+
+          $(".show-counties-check").change(function () {
+            if($(this).is(":checked")) {
+              if (!showCounties) { 
+                countiesHasChanged = true; 
+              } 
+              showCounties = true;
+            } else {
+              if (showCounties) { 
+                countiesHasChanged = true; 
+              } 
+              showCounties = false;
+            }
+            updateMap();
+          });
+        });
+
+        $(function () {
+            $("#show-cities")
+              .append(`<input class="show-cities-check" type="checkbox" id="show-cities-check">`)
+              .append(`<label for="show-cities-check">Show Major Cities</label></div>`)
+              .append(`<br>`);
+
+          $(".show-cities-check").change(function () {
+            if($(this).is(":checked")) {
+              showCities = true;
+            } else {
+              showCities = false;
+            }
+            updateMap();
+          });
+        });
+
+        // var countyNames = counties.features.map (c => c.properties.name );
+        filter_query["incident_county"] = "All";
+
+        var s = $('<select />', {id: "d3-dropdown"});
+        $('<option />', {value: "All", text: "All"}).appendTo(s)
+        for (let c of counties.features) {
+          $('<option />', {value: c.properties.name, text: c.properties.name}).appendTo(s);
+        }
+        s.appendTo('#county-select');
+
+        d3.select("select")
+          .on("change",function(d){
+            var selected = d3.select("#d3-dropdown").node().value;
+            filterData("incident_county", selected);
+        })
+
+        drawVis(dataset);
+      }
+
+      function drawVis(dataset) {
+
+        dataset.sort(function(x, y){
+          return d3.descending(x.incident_acres_burned, y.incident_acres_burned);
+        })
+
+        if (countiesHasChanged) {
+          if (showCounties) {
+            counties.features.forEach((county) => {
+              mapLayer
+              .append("path")
+              .attr("class", "county")
+              .data([county])
+              .attr("d", path)
+              .append("svg:title").text(countyText);
+            });
+          } else {
+            mapLayer.selectAll(".county").remove();
+          }
+          countiesHasChanged = false;
+        }
+
+        mapLayer.selectAll(".city").raise();
+        mapLayer.selectAll(".labels").raise();
+        if (showCities) {
+          var symbolGenerator = d3.symbol()
+          .type(d3.symbolTriangle)
+          .size(8);
+
+          var pathData = symbolGenerator();
+
+          mapLayer.selectAll(".city")
+          .data(cities.cities)
+          .enter().append("path")
+          .attr('d', pathData)
+          .attr("class", "city")
+          .attr("r", 2)
+          .attr("transform", city =>
+              "translate(" + 
+              projection([city.longitude, city.latitude]) +
+              ")"
+          ).raise();
+
+          mapLayer.selectAll(".labels")
+            .data(cities.cities)
+            .enter().append("text")
+            .attr("class", "labels")
+            .text(function(d) { return d.name; })
+            .attr("x", function(d) {
+                return projection([d.longitude, d.latitude])[0];
+            })
+            .attr("y", function(d) {
+                return projection([d.longitude, d.latitude])[1];
+            }).raise();
+          } else {
+            mapLayer.selectAll(".city").remove();
+            mapLayer.selectAll(".labels").remove();
+          }
+        
+
+        //draw the circiles initially and on each interaction with a control
+        let map = mapLayer
+          .selectAll("circle")
+          .data(dataset, (d) => d.incident_id); // give it a key
+
+
+        // filter out first
+        map.exit().remove();
+
+        map
+          .enter()
+          .append("circle")
+          .attr("fill-opacity", 0.5)
+          .attr("fill", d => getColor(d))
+          .attr("r", d => getCircleRadius(d))
+          .attr(
+            "transform",
+            (d) =>
+              "translate(" +
+              projection([d.incident_longitude, d.incident_latitude]) +
+              ")"
+          )
+          .on("mouseover", function (event, d, i) {
+            d3.select(this).style("stroke", d =>  "#bf0000");
+            tooltip.transition().duration(200).style("opacity", 1);
+            tooltip
+              .html(
+                "<b>" +
+                  d.incident_name +
+                  "</b><br>" +
+                  "Year: " +
+                  d.year +
+                  "<br>County: " +
+                  d.incident_county +
+                  "<br>" +
+                  "Acres: " +
+                  d.incident_acres_burned
+              )
+          })
+          .on("mouseout", function (d, i) {
+            d3.select(this).style("stroke", d =>  "transparent");
+            tooltip.transition().duration(500).style("opacity", 0.5);
+          });
+
+        map.raise();
+        map
+          .transition().duration(500)
+          .attr("r", d => getCircleRadius(d))
+          .attr("fill", d => getColor(d));
+
+        var acres = dataset.map(d => d.incident_acres_burned);
+
+        cumulativeInfo
+        .html("<b>Cumulative Info:</b><br>Number of Fires: " + 
+          dataset.length + 
+          "<br>Total Acres Burned: " + 
+          acres.reduce((a, b) => a + b, 0));
+
+        if (showColors) {
+          d3
+          .selectAll(".foo")
+          .style("opacity", 1);
+        } else {
+          d3
+          .selectAll(".foo")
+          .style("opacity", 0);
+        }
+
+        var years = d3.sort(new Set(dataset.map ( d => d.year )).values());
+
+        $("#year-checks").children().map(function() {
+          if (!years.includes(this.id)) {
+            $(this).attr('disabled', this.checked);
+          } else {
+            $(this).removeAttr("disabled");
+          }
+        });
+      }
+
+      function getColor(d) {
+        if (showColors) {
+          return colorScale(d.year);
+        } else {
+          return "#ff5349";
+        }
+      }
+
+      function getCircleRadius(d) {
+        if (mapAcreToArea) {
+          return Math.sqrt(d.incident_acres_burned / 3.14) / 10;
+        } else {
+          return 2;
+        }
+      }
+
+      var countyText = function(d) {
+        return d.properties.name;
+      }
+
+      function updateMap() {
+        // generating query
+        let query = [];
+        for (let attr in filter_query) {
+          // for simpler code, consider using underscore.js or equivalent.
+          let r = filter_query[attr];
+          if (r.constructor.name === "Array" && isRange(attr)) {
+            // how you get datatype
+            // for a continous variable (filtered by array)
+            query.push({
+              key: attr,
+              range: r,
+            });
+          } else if (r.constructor.name === "Array") {
+            // for categorical variable, when it is "all", no query is generated
+            query.push({
+              key: attr,
+              values: r
+            })
+          } else if (r.constructor.name === "String" && r != "All") {
+            // for categorical variable, when it is "all", no query is generated
+            query.push({
+              key: attr,
+              values: r
+            })
+          }
+        }
+        let toVisualize = dataset.filter((d, i) => isQueried(d, query));
+        drawVis(toVisualize);
+      }
+
+      function filterData(_attr, values) {
+        //update filter data
+        filter_query[_attr] = values;
+        // generating query
+        let query = [];
+        for (let attr in filter_query) {
+          // for simpler code, consider using underscore.js or equivalent.
+          let r = filter_query[attr];
+          if (r.constructor.name === "Array" && isRange(attr)) {
+            // how you get datatype
+            // for a continous variable (filtered by array)
+            query.push({
+              key: attr,
+              range: r,
+            });
+          } else if (r.constructor.name === "Array") {
+            query.push({
+              key: attr,
+              values: r
+            })
+          } else if (r.constructor.name === "String" && r != "All") {
+            // for categorical variable, when it is "all", no query is generated
+            query.push({
+              key: attr,
+              values: r
+            })
+          }
+        }
+        let toVisualize = dataset.filter((d, i) => isQueried(d, query));
+        drawVis(toVisualize);
+      }
+
+      function isQueried(d, query) {
+        // if not in a range or not the value, return false; otherwise return true;
+        // query could be JSON, but Array tends to be more generic.
+        
+        for (let i = 0; i < query.length; i++) {
+          let val = d[query[i].key];
+          if (query[i].hasOwnProperty("range")) {
+            if (query[i].range[0] > val || query[i].range[1] < val) {
+              return false;
+            }
+          } else if (query[i].hasOwnProperty("values")) {
+            if (query[i].key == "years") {
+              val = d.year;
+              if (!query[i].values.includes(val)) {
+                return false;
+              }
+            } 
+
+            if (query[i].key == "incident_county") {
+              if (!val.includes(query[i].values)) {
+                return false;
+              }
+            }
+            
+          }
+        }
+        return true;
+      }
+    </script>
+    <div class="info">
+      <p class="current"></p>
+      <div class="accumulative-info"></div>
+
+      <p>
+        <label for="size"><b>Acres Burned:</b></label>
+        <input
+          type="text"
+          id="size"
+          readonly
+          style="border: 0; color: #f6931f; font-weight: bold"
+        />
+      </p>
+
+      <div id="slider-range"></div>
+      <p></p>
+      <label><b>Select County:</b></label>
+      <div id="county-select"></div>
+
+      <p>
+        <label for="year"><b>Year:</b></label>
+        <div id="year-checks"></div>
+      </p>
+      
+
+      <label for="map-to-area"><b>Map interactions:</b></label>
+      <p></p>
+        <div id="acre-to-area"></div>        
+      </p>
+      <p></p>
+        <div id="year-to-color"></div>        
+      </p>
+      <p></p>
+        <div id="show-counties"></div>        
+      </p>
+      <p></p>
+        <div id="show-cities"></div>        
+      </p>
+      
+
+    </div>
+  </body>
+</html>
